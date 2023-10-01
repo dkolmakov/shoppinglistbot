@@ -1,0 +1,4 @@
+*.json
+run_bot.sh
+__pycache__/
+pyenv/
