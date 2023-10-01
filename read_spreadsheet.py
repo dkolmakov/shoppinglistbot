@@ -7,7 +7,7 @@ def read_items_list():
     credentials_path = 'crested-epoch-387707-130966324077.json'
 
     # Define the name of your Google Sheets spreadsheet
-    spreadsheet_name = 'buying-list'
+    spreadsheet_name = 'shopping-list'
 
     # Authenticate with Google Sheets API using credentials
     # scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']

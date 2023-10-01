@@ -39,7 +39,7 @@ class ItemState:
     def make_button(self, data):
         logger.info(f"make {data} button - {self.name}")
         symbol = '\U0001F7E2' if self.active else '\U0001F534'
-        return InlineKeyboardButton(f"{symbol} {self.name} {self.default}", callback_data=f"{data}")
+        return InlineKeyboardButton(f"{symbol} {self.name}", callback_data=f"{data}")
 
 
 class ItemsState:
