@@ -1,4 +1,6 @@
 *.json
-run_bot.sh
+*.sh
 __pycache__/
 pyenv/
+*.tar.gz
+list-bot/
