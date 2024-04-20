@@ -2,12 +2,13 @@ import logging
 import sys
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes, ApplicationBuilder, CallbackQueryHandler
-from read_spreadsheet import read_items_list
+from read_filelist import read_items_list
 
 # Set up logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+full_list_show_step = 10
 main_menu_keyboard = [['Show list', 'Show full list', 'Reset states']]
 reply_keyboard = ReplyKeyboardMarkup(main_menu_keyboard, one_time_keyboard=False, resize_keyboard=True)
 
@@ -125,21 +126,31 @@ class ItemsState:
             if state.is_active():
                 keyboard.append([state.make_button(f"active_list|deactivate|{self.get_id_by_item(item)}")])
 
-        return InlineKeyboardMarkup(keyboard)
+        return "To buy list", InlineKeyboardMarkup(keyboard)
 
-    def full_item_list_keyboard(self):
+    def full_item_list_keyboard(self, pos):
         keyboard = []
 
         logger.info(f"full items list")
 
-        # Apply ordering here
-        for item, state in self.items_state.items():
-            if state.is_active():
-                keyboard.append([state.make_button(f"full_list|deactivate|{self.get_id_by_item(item)}")])
-            else:
-                keyboard.append([state.make_button(f"full_list|activate|{self.get_id_by_item(item)}")])
+        length = len(self.items_state)
 
-        return InlineKeyboardMarkup(keyboard)
+        if pos >= length or pos < 0:
+            return "", None
+
+        start = pos
+        end = pos + full_list_show_step if (pos + full_list_show_step) <= length else length
+        items = list(self.items_state.items())
+
+        for item, state in items[start:end]:
+            if state.is_active():
+                keyboard.append([state.make_button(f"full_list|deactivate|{self.get_id_by_item(item)}|{pos}")])
+            else:
+                keyboard.append([state.make_button(f"full_list|activate|{self.get_id_by_item(item)}|{pos}")])
+
+        keyboard.append([InlineKeyboardButton(f"<<=", callback_data=f"full_list|show_previous|{pos}"), InlineKeyboardButton(f"=>>", callback_data=f"full_list|show_next|{pos}")])
+
+        return f"Full list {start}:{end}", InlineKeyboardMarkup(keyboard)
     
 
 class ShowListHandler:
@@ -150,9 +161,10 @@ class ShowListHandler:
         self.state.update_list()
 
         user = update.message.from_user
+        label, new_keyboard = self.state.active_item_list_keyboard()
         await context.bot.send_message(chat_id=update.effective_chat.id,
-                                    text=f"Hello {user.first_name}! Current list:",
-                                    reply_markup=self.state.active_item_list_keyboard())
+                                    text=f"Hello {user.first_name}! {label}:",
+                                    reply_markup=new_keyboard)
 
 class ShowFullListHandler:
     def __init__(self, state):
@@ -162,9 +174,10 @@ class ShowFullListHandler:
         self.state.update_list()
 
         user = update.message.from_user
+        label, new_keyboard = self.state.full_item_list_keyboard(0)
         await context.bot.send_message(chat_id=update.effective_chat.id,
-                                    text=f"Hello {user.first_name}! Full items list:",
-                                    reply_markup=self.state.full_item_list_keyboard())
+                                    text=f"Hello {user.first_name}! {label}:",
+                                    reply_markup=new_keyboard)
 
 class ResetHandler:
     def __init__(self, state):
@@ -180,19 +193,21 @@ class DeactivateItemHandler:
 
     async def __call__(self, update: Update, context) -> None:
         query = update.callback_query
-        current_list = query.data.split('|')[0]
-        item_num = int(query.data.split('|')[2])
+        data = query.data.split('|')
+        current_list = data[0]
+        item_num = int(data[2])
 
         await query.answer()
 
         if self.state.deactivate(self.state.get_item_by_id(item_num)):
             if current_list == "active_list":
-                new_keyboard = self.state.active_item_list_keyboard()
+                label, new_keyboard = self.state.active_item_list_keyboard()
             else:
-                new_keyboard = self.state.full_item_list_keyboard()
+                current_pos = int(data[3])
+                label, new_keyboard = self.state.full_item_list_keyboard(current_pos)
 
             await query.edit_message_text(
-                text="Updated!",
+                text=label,
                 reply_markup=new_keyboard,
             )    
 
@@ -202,18 +217,41 @@ class ActivateItemHandler:
 
     async def __call__(self, update: Update, context) -> None:
         query = update.callback_query
-        item_num = int(query.data.split('|')[2])
+        data = query.data.split('|')
+        item_num = int(data[2])
+        current_pos = int(data[3])
 
         await query.answer()
 
         if self.state.activate(self.state.get_item_by_id(item_num)):
-            new_keyboard = self.state.full_item_list_keyboard()
+            label, new_keyboard = self.state.full_item_list_keyboard(current_pos)
 
             await query.edit_message_text(
-                text="Updated!",
+                text=label,
                 reply_markup=new_keyboard,
             )    
 
+class NextPreviousItemsHandler:
+    def __init__(self, state):
+        self.state = state
+
+    async def __call__(self, update: Update, context) -> None:
+        query = update.callback_query
+        data = query.data.split('|')
+        current_list = data[0]
+        next_or_previous = data[1]
+        current_pos = int(data[2])
+
+        await query.answer()
+
+        current_pos += full_list_show_step if next_or_previous == "show_next" else -full_list_show_step
+
+        label, new_keyboard = self.state.full_item_list_keyboard(current_pos)
+        if new_keyboard is not None:
+            await query.edit_message_text(
+                text=label,
+                reply_markup=new_keyboard,
+            )    
 
 class UserFilter(filters.MessageFilter):
     def __init__(self, users):
@@ -237,6 +275,8 @@ def main() -> None:
 
     app.add_handler(CallbackQueryHandler(DeactivateItemHandler(state), pattern=r"^(active_list|full_list)\|deactivate\|.+"))
     app.add_handler(CallbackQueryHandler(ActivateItemHandler(state), pattern=r"^full_list\|activate\|.+"))
+    app.add_handler(CallbackQueryHandler(NextPreviousItemsHandler(state), pattern=r"^full_list\|show_next\|.+"))
+    app.add_handler(CallbackQueryHandler(NextPreviousItemsHandler(state), pattern=r"^full_list\|show_previous\|.+"))
 
     # Start the Bot
     app.run_polling(allowed_updates=Update.ALL_TYPES)
